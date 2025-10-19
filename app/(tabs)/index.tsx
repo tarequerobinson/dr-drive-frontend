@@ -197,7 +197,7 @@ export default function HomeScreen() {
             style={[styles.captureButton, isRecording && styles.stopButton]}
           >
             <ThemedText style={styles.captureButtonText}>
-              {isRecording ? '⏹ Stop Recording' : `${title.includes('Photo') ? '■ Start Photo' : '● Start Recording'}`}
+              {isRecording ? '⏹ Stop Recording' : `${title.includes('Photo') ? '■ Take Photo' : '● Start Recording'}`}
             </ThemedText>
           </TouchableOpacity>
 
@@ -657,13 +657,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 16,
     fontWeight: '600',
-  },
-  cancelButton: {
-    paddingVertical: 12,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: '#e5e5e5',
-    alignItems: 'center',
   },
   cancelButtonText: {
     fontSize: 16,

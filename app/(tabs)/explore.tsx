@@ -5,8 +5,10 @@ import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Fonts } from '@/constants/theme';
+import { useAuth } from '@/contexts/auth-context';
 
 export default function ProfileScreen() {
+  const { signOut } = useAuth();
   const [profile, setProfile] = useState({
     firstName: 'John',
     lastName: 'Doe',
@@ -182,11 +184,18 @@ export default function ProfileScreen() {
 
       <ThemedView style={styles.buttonContainer}>
         {!isEditing ? (
-          <TouchableOpacity
-            style={styles.editButton}
-            onPress={() => setIsEditing(true)}>
-            <ThemedText style={styles.buttonText}>Edit Profile</ThemedText>
-          </TouchableOpacity>
+          <ThemedView>
+            <TouchableOpacity
+              style={styles.editButton}
+              onPress={() => setIsEditing(true)}>
+              <ThemedText style={styles.buttonText}>Edit Profile</ThemedText>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[styles.editButton, styles.logoutButton]}
+              onPress={signOut}>
+              <ThemedText style={styles.buttonText}>Logout</ThemedText>
+            </TouchableOpacity>
+          </ThemedView>
         ) : (
           <ThemedView style={styles.buttonRow}>
             <TouchableOpacity
@@ -289,5 +298,9 @@ const styles = StyleSheet.create({
     color: '#000',
     fontSize: 14,
     fontWeight: '600',
+  },
+  logoutButton: {
+    marginTop: 12,
+    backgroundColor: '#FF3B30',
   },
 });
