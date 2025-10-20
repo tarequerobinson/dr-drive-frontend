@@ -1,21 +1,18 @@
 import { Image } from 'expo-image';
 import { Platform, StyleSheet, TouchableOpacity, ScrollView, TextInput, Modal, View, ActivityIndicator, Alert } from 'react-native';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import * as ImagePicker from 'expo-image-picker';
-import * as Audio from 'expo-av';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 
-// API Configuration - Update this with your backend URL
-const API_BASE_URL = 'http://127.0.0.1:6000/api'; // Change to your IP address
+const API_BASE_URL = 'https://dr-drive-backend.onrender.com/api';
 
 interface CaptureResult {
     id: string;
-    type: 'image' | 'audio';
+    type: 'image';
     timestamp: string;
     content: string;
-    duration?: string;
     uri?: string;
 }
 
@@ -25,9 +22,6 @@ export default function HomeScreen() {
     const [result, setResult] = useState<{ problem: string; solution: string } | null>(null);
     const [isLoading, setIsLoading] = useState(false);
     const [showCameraModal, setShowCameraModal] = useState(false);
-    const [showAudioModal, setShowAudioModal] = useState(false);
-    const [isRecording, setIsRecording] = useState(false);
-    const [recordingTime, setRecordingTime] = useState(0);
     const [recentCaptures, setRecentCaptures] = useState<CaptureResult[]>([
         {
             id: '1',
@@ -37,10 +31,9 @@ export default function HomeScreen() {
         },
         {
             id: '2',
-            type: 'audio',
+            type: 'image',
             timestamp: 'Today 1:15 PM',
             content: 'The AC unit is making a strange noise and not cooling properly...',
-            duration: '2:45',
         },
         {
             id: '3',
@@ -49,7 +42,25 @@ export default function HomeScreen() {
             content: 'Cracked bathroom tile',
         },
     ]);
-    const [recordingRef] = useState<{ current: Audio.Recording | null }>({ current: null });
+
+    // Request permissions on mount
+    useEffect(() => {
+        (async () => {
+            if (Platform.OS !== 'web') {
+                // Request camera permissions
+                const cameraStatus = await ImagePicker.requestCameraPermissionsAsync();
+                if (cameraStatus.status !== 'granted') {
+                    console.log('Camera permission not granted');
+                }
+
+                // Request media library permissions
+                const mediaStatus = await ImagePicker.requestMediaLibraryPermissionsAsync();
+                if (mediaStatus.status !== 'granted') {
+                    console.log('Media library permission not granted');
+                }
+            }
+        })();
+    }, []);
 
     // Get JWT token from storage
     const getAuthToken = async (): Promise<string | null> => {
@@ -72,11 +83,6 @@ export default function HomeScreen() {
     // Send request to backend
     const sendDiagnosisRequest = async (prompt: string, imageUri?: string) => {
         const token = await getAuthToken();
-
-        // if (!token) {
-        //     Alert.alert('Authentication Required', 'Please login to use this feature');
-        //     throw new Error('No authentication token');
-        // }
 
         const formData = new FormData();
         formData.append('prompt', prompt);
@@ -109,104 +115,68 @@ export default function HomeScreen() {
     };
 
     const handlePickImage = async () => {
-        const result = await ImagePicker.launchImageLibraryAsync({
-            mediaTypes: ImagePicker.MediaTypeOptions.All,
-            allowsEditing: true,
-            quality: 1,
-        });
+        try {
+            // Check permission first
+            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
 
-        if (!result.canceled) {
-            setSelectedMedia(result.assets[0].uri);
+            if (status !== 'granted') {
+                Alert.alert(
+                    'Permission Required',
+                    'Please grant photo library access to upload images.',
+                    [{ text: 'OK' }]
+                );
+                return;
+            }
+
+            const result = await ImagePicker.launchImageLibraryAsync({
+                mediaTypes: ImagePicker.MediaTypeOptions.Images,
+                allowsEditing: true,
+                quality: 1,
+            });
+
+            if (!result.canceled) {
+                setSelectedMedia(result.assets[0].uri);
+            }
+        } catch (error) {
+            console.error('Error picking image:', error);
+            Alert.alert('Error', 'Failed to pick image. Please try again.');
         }
     };
 
     const handleTakePhoto = async () => {
-        const result = await ImagePicker.launchCameraAsync({
-            allowsEditing: true,
-            quality: 1,
-        });
-
-        if (!result.canceled) {
-            setSelectedMedia(result.assets[0].uri);
-            const newCapture: CaptureResult = {
-                id: `img-${Date.now()}`,
-                type: 'image',
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                content: 'Photo captured - ready for analysis',
-                uri: result.assets[0].uri,
-            };
-            setRecentCaptures([newCapture, ...recentCaptures]);
-            setShowCameraModal(false);
-        }
-    };
-
-    const handleStartRecording = async () => {
         try {
-            await Audio.requestPermissionsAsync();
-            await Audio.setAudioModeAsync({
-                allowsRecordingIOS: true,
-                playsInSilentModeIOS: true,
-            });
+            // Check permission first
+            const { status } = await ImagePicker.requestCameraPermissionsAsync();
 
-            const { recording } = await Audio.Recording.createAsync(
-                Audio.RecordingOptionsPresets.HIGH_QUALITY
-            );
-            recordingRef.current = recording;
-            setIsRecording(true);
-            setRecordingTime(0);
+            if (status !== 'granted') {
+                Alert.alert(
+                    'Permission Required',
+                    'Please grant camera access to take photos.',
+                    [{ text: 'OK' }]
+                );
+                return;
+            }
 
-            const interval = setInterval(() => {
-                setRecordingTime((prev) => prev + 1);
-            }, 1000);
-
-            return () => clearInterval(interval);
-        } catch (err) {
-            Alert.alert('Recording Error', 'Failed to start recording');
-        }
-    };
-
-    const handleStopRecording = async () => {
-        if (!recordingRef.current) return;
-
-        try {
-            await recordingRef.current.stopAndUnloadAsync();
-            const uri = recordingRef.current.getURI();
-
-            const newCapture: CaptureResult = {
-                id: `audio-${Date.now()}`,
-                type: 'audio',
-                timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-                content: 'Audio captured and transcribed: The washing machine is leaking from the bottom...',
-                duration: `${Math.floor(recordingTime / 60)}:${(recordingTime % 60).toString().padStart(2, '0')}`,
-                uri,
-            };
-
-            setRecentCaptures([newCapture, ...recentCaptures]);
-            setProblemDescription(newCapture.content.replace('Audio captured and transcribed: ', ''));
-            setIsRecording(false);
-            setShowAudioModal(false);
-            recordingRef.current = null;
-        } catch (err) {
-            Alert.alert('Recording Error', 'Failed to stop recording');
-        }
-    };
-
-    const handleTranscribeAudio = async () => {
-        try {
-            await Audio.requestPermissionsAsync();
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ImagePicker.MediaTypeOptions.Audio,
+            const result = await ImagePicker.launchCameraAsync({
+                allowsEditing: true,
+                quality: 1,
             });
 
             if (!result.canceled) {
-                setIsLoading(true);
-                // Mock transcription - in a real app, send to backend
-                const mockTranscription = 'The kitchen faucet has been dripping continuously for the past few days and the water pressure seems low on that line. Please help identify the issue.';
-                setProblemDescription(mockTranscription);
-                setIsLoading(false);
+                setSelectedMedia(result.assets[0].uri);
+                const newCapture: CaptureResult = {
+                    id: `img-${Date.now()}`,
+                    type: 'image',
+                    timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    content: 'Photo captured - ready for analysis',
+                    uri: result.assets[0].uri,
+                };
+                setRecentCaptures([newCapture, ...recentCaptures]);
+                setShowCameraModal(false);
             }
-        } catch (err) {
-            Alert.alert('Transcription Error', 'Failed to transcribe audio');
+        } catch (error) {
+            console.error('Error taking photo:', error);
+            Alert.alert('Error', 'Failed to take photo. Please try again.');
         }
     };
 
@@ -248,30 +218,18 @@ export default function HomeScreen() {
         }
     };
 
-    const CaptureModal = ({ visible, title, onClose, onCapture, isRecording, recordingTime }: any) => (
+    const CaptureModal = ({ visible, title, onClose, onCapture }: any) => (
         <Modal visible={visible} transparent animationType="slide">
             <View style={styles.modalOverlay}>
                 <ThemedView style={styles.modalContent}>
                     <ThemedText style={styles.modalTitle}>{title}</ThemedText>
 
-                    {isRecording ? (
-                        <ThemedView style={styles.recordingContainer}>
-                            <ThemedView style={styles.recordingIndicator}>
-                                <View style={styles.recordingDot} />
-                                <ThemedText style={styles.recordingTime}>
-                                    {Math.floor(recordingTime / 60)}:{(recordingTime % 60).toString().padStart(2, '0')}
-                                </ThemedText>
-                            </ThemedView>
-                            <ThemedText style={styles.recordingText}>Recording in progress...</ThemedText>
-                        </ThemedView>
-                    ) : null}
-
                     <TouchableOpacity
-                        onPress={isRecording ? handleStopRecording : onCapture}
-                        style={[styles.captureButton, isRecording && styles.stopButton]}
+                        onPress={onCapture}
+                        style={styles.captureButton}
                     >
                         <ThemedText style={styles.captureButtonText}>
-                            {isRecording ? '⏹ Stop Recording' : `${title.includes('Photo') ? '■ Start Photo' : '● Start Recording'}`}
+                            Take Photo
                         </ThemedText>
                     </TouchableOpacity>
 
@@ -288,20 +246,16 @@ export default function HomeScreen() {
             onPress={() => setProblemDescription(item.content)}
             style={styles.captureItem}
         >
-            <ThemedView style={[styles.captureIcon, { backgroundColor: item.type === 'image' ? '#E8F5FF' : '#FFF3E0' }]}>
-                <ThemedText style={styles.captureEmoji}>
-                    {item.type === 'image' ? '■' : '●'}
-                </ThemedText>
+            <ThemedView style={[styles.captureIcon, { backgroundColor: '#E8F5FF' }]}>
+                <ThemedText style={styles.captureEmoji}>📷</ThemedText>
             </ThemedView>
             <ThemedView style={styles.captureInfo}>
-                <ThemedText style={styles.captureTitle}>
-                    {item.type === 'image' ? 'Photo Capture' : 'Audio Transcription'}
-                </ThemedText>
+                <ThemedText style={styles.captureTitle}>Photo Capture</ThemedText>
                 <ThemedText style={styles.captureDescription} numberOfLines={1}>
                     {item.content}
                 </ThemedText>
                 <ThemedText style={styles.captureTime}>
-                    {item.timestamp} {item.duration && `• ${item.duration}`}
+                    {item.timestamp}
                 </ThemedText>
             </ThemedView>
         </TouchableOpacity>
@@ -316,7 +270,7 @@ export default function HomeScreen() {
                             <ThemedText type="title" style={styles.title}>
                                 Hi, how can we help?
                             </ThemedText>
-                            <ThemedText style={styles.subtitle}>Describe your issue or capture media</ThemedText>
+                            <ThemedText style={styles.subtitle}>Describe your issue or capture a photo</ThemedText>
                         </ThemedView>
 
                         <ThemedView style={styles.quickActionsContainer}>
@@ -324,46 +278,29 @@ export default function HomeScreen() {
                                 style={styles.quickActionButton}
                                 onPress={() => setShowCameraModal(true)}
                             >
-                                <ThemedText style={styles.quickActionEmoji}>■</ThemedText>
+                                <ThemedText style={styles.quickActionEmoji}>📷</ThemedText>
                                 <ThemedText style={styles.quickActionText}>Take Photo</ThemedText>
-                            </TouchableOpacity>
-
-                            <TouchableOpacity
-                                style={styles.quickActionButton}
-                                onPress={() => setShowAudioModal(true)}
-                            >
-                                <ThemedText style={styles.quickActionEmoji}>●</ThemedText>
-                                <ThemedText style={styles.quickActionText}>Record Audio</ThemedText>
                             </TouchableOpacity>
 
                             <TouchableOpacity
                                 style={styles.quickActionButton}
                                 onPress={handlePickImage}
                             >
-                                <ThemedText style={styles.quickActionEmoji}>↓</ThemedText>
+                                <ThemedText style={styles.quickActionEmoji}>📁</ThemedText>
                                 <ThemedText style={styles.quickActionText}>Upload</ThemedText>
                             </TouchableOpacity>
                         </ThemedView>
 
                         <ThemedView style={styles.inputContainer}>
-                            <ThemedView style={styles.textInputWrapper}>
-                                <TextInput
-                                    style={styles.textInput}
-                                    placeholder="Describe the issue here..."
-                                    placeholderTextColor="#999"
-                                    value={problemDescription}
-                                    onChangeText={setProblemDescription}
-                                    multiline
-                                    numberOfLines={4}
-                                />
-                                <TouchableOpacity
-                                    style={styles.transcribeButton}
-                                    onPress={handleTranscribeAudio}
-                                    disabled={isLoading}
-                                >
-                                    <ThemedText style={styles.transcribeButtonText}>∿</ThemedText>
-                                </TouchableOpacity>
-                            </ThemedView>
+                            <TextInput
+                                style={styles.textInput}
+                                placeholder="Describe the issue here..."
+                                placeholderTextColor="#999"
+                                value={problemDescription}
+                                onChangeText={setProblemDescription}
+                                multiline
+                                numberOfLines={4}
+                            />
 
                             {selectedMedia && (
                                 <ThemedView style={styles.mediaPreview}>
@@ -424,16 +361,6 @@ export default function HomeScreen() {
                 title="Take a Photo"
                 onClose={() => setShowCameraModal(false)}
                 onCapture={handleTakePhoto}
-                isRecording={false}
-            />
-
-            <CaptureModal
-                visible={showAudioModal}
-                title="Record Audio"
-                onClose={() => setShowAudioModal(false)}
-                onCapture={handleStartRecording}
-                isRecording={isRecording}
-                recordingTime={recordingTime}
             />
         </ScrollView>
     );
@@ -493,11 +420,10 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         alignItems: 'center',
         gap: 4,
-        maxWidth: 100,
+        maxWidth: 150,
     },
     quickActionEmoji: {
         fontSize: 24,
-        fontWeight: '600',
     },
     quickActionText: {
         fontSize: 11,
@@ -510,37 +436,16 @@ const styles = StyleSheet.create({
         gap: 12,
         width: '100%',
     },
-    textInputWrapper: {
-        position: 'relative',
-        flexDirection: 'row',
-        width: '100%',
-    },
     textInput: {
         flex: 1,
         padding: 16,
-        paddingRight: 48,
         borderRadius: 12,
         backgroundColor: '#f5f5f5',
         fontSize: 16,
         color: '#000',
         minHeight: 100,
         textAlignVertical: 'top',
-    },
-    transcribeButton: {
-        position: 'absolute',
-        right: 12,
-        bottom: 12,
-        width: 36,
-        height: 36,
-        borderRadius: 8,
-        backgroundColor: '#000',
-        justifyContent: 'center',
-        alignItems: 'center',
-    },
-    transcribeButtonText: {
-        color: '#fff',
-        fontSize: 20,
-        fontWeight: '600',
+        width: '100%',
     },
     mediaPreview: {
         borderRadius: 12,
@@ -570,16 +475,6 @@ const styles = StyleSheet.create({
         fontSize: 18,
         fontWeight: '600',
     },
-    recentCapturesContainer: {
-        marginBottom: 20,
-        gap: 8,
-    },
-    recentCapturesTitle: {
-        fontSize: 14,
-        fontWeight: '700',
-        marginBottom: 8,
-        color: '#333',
-    },
     captureItem: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -597,7 +492,6 @@ const styles = StyleSheet.create({
     },
     captureEmoji: {
         fontSize: 22,
-        fontWeight: '600',
     },
     captureInfo: {
         flex: 1,
@@ -638,7 +532,6 @@ const styles = StyleSheet.create({
         borderRadius: 16,
         padding: 24,
         marginBottom: 20,
-        flex: 1,
         width: '100%',
     },
     resultContent: {
@@ -692,40 +585,11 @@ const styles = StyleSheet.create({
         fontWeight: '700',
         marginBottom: 8,
     },
-    recordingContainer: {
-        alignItems: 'center',
-        gap: 12,
-        paddingVertical: 20,
-    },
-    recordingIndicator: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    recordingDot: {
-        width: 12,
-        height: 12,
-        borderRadius: 6,
-        backgroundColor: '#ff3b30',
-    },
-    recordingTime: {
-        fontSize: 24,
-        fontWeight: '700',
-        color: '#000',
-    },
-    recordingText: {
-        fontSize: 14,
-        color: '#666',
-        fontWeight: '500',
-    },
     captureButton: {
         backgroundColor: '#000',
         paddingVertical: 14,
         borderRadius: 12,
         alignItems: 'center',
-    },
-    stopButton: {
-        backgroundColor: '#ff3b30',
     },
     captureButtonText: {
         color: '#fff',
