@@ -1,28 +1,56 @@
-import { useState, useEffect } from 'react';
-import { Image, Platform, StyleSheet, TouchableOpacity, TextInput, ScrollView, Alert } from 'react-native';
-import * as ImagePicker from 'expo-image-picker';
 import ParallaxScrollView from '@/components/parallax-scroll-view';
 import { ThemedText } from '@/components/themed-text';
 import { ThemedView } from '@/components/themed-view';
 import { IconSymbol } from '@/components/ui/icon-symbol';
 import { Fonts } from '@/constants/theme';
 import { useAuth } from '@/contexts/auth-context';
+import * as ImagePicker from 'expo-image-picker';
+import { useEffect, useState } from 'react';
+import { ActivityIndicator, Alert, Image, Platform, StyleSheet, TextInput, TouchableOpacity, useColorScheme } from 'react-native';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
+
+const API_BASE_URL = 'https://dr-drive-backend.onrender.com/api';
+
+const AnimatedTouchable = Animated.createAnimatedComponent(TouchableOpacity);
+const AnimatedView = Animated.createAnimatedComponent(ThemedView);
 
 export default function ProfileScreen() {
-    const { signOut } = useAuth();
+    const colorScheme = useColorScheme();
+    const isDark = colorScheme === 'dark';
+    const { signOut, user, token } = useAuth();
+    
     const [profile, setProfile] = useState({
-        firstName: 'John',
-        lastName: 'Doe',
-        email: 'john.doe@example.com',
-        phone: '+1 (555) 123-4567',
-        year: '2022',
-        chassis: 'ZC127S',
-        make: 'Suzuki',
-        model: 'Swift',
+        username: '',
+        email: '',
+        phone: '',
+        year: '',
+        chassis: '',
+        make: '',
+        model: '',
         profileImage: null,
     });
     const [isEditing, setIsEditing] = useState(false);
     const [editedProfile, setEditedProfile] = useState(profile);
+    const [isLoading, setIsLoading] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
+
+    // Load user data on mount
+    useEffect(() => {
+        if (user) {
+            const userData = {
+                username: user.username || '',
+                email: user.email || '',
+                phone: user.phone || '',
+                year: user.year?.toString() || '',
+                chassis: user.chassis || '',
+                make: user.make || '',
+                model: user.model || '',
+                profileImage: null,
+            };
+            setProfile(userData);
+            setEditedProfile(userData);
+        }
+    }, [user]);
 
     // Request permissions on mount
     useEffect(() => {
@@ -65,9 +93,67 @@ export default function ProfileScreen() {
         }
     };
 
-    const handleSave = () => {
-        setProfile(editedProfile);
-        setIsEditing(false);
+    const handleSave = async () => {
+        setIsSaving(true);
+        try {
+            // Prepare update payload
+            const updateData: any = {
+                username: editedProfile.username,
+                email: editedProfile.email,
+                phone: editedProfile.phone,
+            };
+
+            // Add vehicle info if provided
+            if (editedProfile.year) {
+                updateData.year = parseInt(editedProfile.year);
+            }
+            if (editedProfile.make) {
+                updateData.make = editedProfile.make;
+            }
+            if (editedProfile.model) {
+                updateData.model = editedProfile.model;
+            }
+            if (editedProfile.chassis) {
+                updateData.chassis = editedProfile.chassis;
+            }
+
+            console.log('Updating profile:', updateData);
+
+            const response = await fetch(`${API_BASE_URL}/profile`, {
+                method: 'PUT',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${token}`,
+                },
+                body: JSON.stringify(updateData),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || 'Failed to update profile');
+            }
+
+            if (data.success) {
+                setProfile(editedProfile);
+                setIsEditing(false);
+                
+                // Update auth context with new token if provided
+                if (data.token) {
+                    // You might want to update the auth context here
+                    console.log('New token received:', data.token);
+                }
+
+                Alert.alert('Success', 'Profile updated successfully');
+            } else {
+                throw new Error(data.error || 'Failed to update profile');
+            }
+        } catch (error: any) {
+            console.error('Update profile error:', error);
+            Alert.alert('Error', error.message || 'Failed to update profile. Please try again.');
+        } finally {
+            setIsSaving(false);
+        }
     };
 
     const handleCancel = () => {
@@ -75,13 +161,20 @@ export default function ProfileScreen() {
         setIsEditing(false);
     };
 
-    const handleInputChange = (field, value) => {
+    const handleInputChange = (field: string, value: string) => {
         setEditedProfile({ ...editedProfile, [field]: value });
+    };
+
+    const getVehicleDisplay = () => {
+        if (profile.year && profile.make && profile.model) {
+            return `${profile.year} ${profile.make} ${profile.model}`;
+        }
+        return 'No vehicle information';
     };
 
     return (
         <ParallaxScrollView
-            headerBackgroundColor={{ light: '#D0D0D0', dark: '#353636' }}
+            headerBackgroundColor={{ light: '#f5f5f5', dark: '#1a1a1a' }}
             headerImage={
                 editedProfile.profileImage ? (
                     <Image
@@ -91,152 +184,194 @@ export default function ProfileScreen() {
                 ) : (
                     <IconSymbol
                         size={310}
-                        color="#808080"
+                        color={isDark ? '#fff' : '#000'}
                         name="person.crop.circle"
                         style={styles.headerImage}
                     />
                 )
             }>
-            <ThemedView style={styles.titleContainer}>
+            <AnimatedView 
+                entering={FadeInDown.duration(400)}
+                style={styles.titleContainer}
+            >
                 <ThemedText
                     type="title"
                     style={{
                         fontFamily: Fonts.rounded,
+                        fontWeight: '800',
                     }}>
                     Profile Settings
                 </ThemedText>
-            </ThemedView>
+                {!isEditing && (
+                    <ThemedText style={[styles.vehicleSubtitle, isDark && styles.vehicleSubtitleDark]}>
+                        {getVehicleDisplay()}
+                    </ThemedText>
+                )}
+            </AnimatedView>
 
             {isEditing && (
-                <ThemedView style={styles.imagePickerContainer}>
+                <AnimatedView 
+                    entering={FadeInUp.delay(200)}
+                    style={styles.imagePickerContainer}
+                >
                     <TouchableOpacity
-                        style={styles.changePhotoButton}
+                        style={[styles.changePhotoButton, isDark && styles.changePhotoButtonDark]}
                         onPress={pickImage}>
                         <ThemedText style={styles.changePhotoText}>Change Profile Photo</ThemedText>
                     </TouchableOpacity>
-                </ThemedView>
+                </AnimatedView>
             )}
 
-            <ThemedView style={styles.section}>
-                <ThemedText style={styles.sectionTitle}>Personal Information</ThemedText>
+            <AnimatedView 
+                entering={FadeInUp.delay(300)}
+                style={styles.section}
+            >
+                <ThemedText style={[styles.sectionTitle, isDark && styles.sectionTitleDark]}>
+                    Personal Information
+                </ThemedText>
+                
                 <ThemedView style={styles.inputGroup}>
-                    <ThemedText style={styles.label}>First Name</ThemedText>
+                    <ThemedText style={styles.label}>Username</ThemedText>
                     {isEditing ? (
                         <TextInput
-                            style={styles.input}
-                            value={editedProfile.firstName}
-                            onChangeText={(value) => handleInputChange('firstName', value)}
-                            placeholder="First name"
+                            style={[styles.input, isDark && styles.inputDark]}
+                            value={editedProfile.username}
+                            onChangeText={(value) => handleInputChange('username', value)}
+                            placeholder="Username"
+                            placeholderTextColor={isDark ? '#888' : '#999'}
                         />
                     ) : (
-                        <ThemedText style={styles.displayValue}>{profile.firstName}</ThemedText>
+                        <ThemedText style={[styles.displayValue, isDark && styles.displayValueDark]}>
+                            {profile.username}
+                        </ThemedText>
                     )}
                 </ThemedView>
-                <ThemedView style={styles.inputGroup}>
-                    <ThemedText style={styles.label}>Last Name</ThemedText>
-                    {isEditing ? (
-                        <TextInput
-                            style={styles.input}
-                            value={editedProfile.lastName}
-                            onChangeText={(value) => handleInputChange('lastName', value)}
-                            placeholder="Last name"
-                        />
-                    ) : (
-                        <ThemedText style={styles.displayValue}>{profile.lastName}</ThemedText>
-                    )}
-                </ThemedView>
+
                 <ThemedView style={styles.inputGroup}>
                     <ThemedText style={styles.label}>Email</ThemedText>
                     {isEditing ? (
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, isDark && styles.inputDark]}
                             value={editedProfile.email}
                             onChangeText={(value) => handleInputChange('email', value)}
                             placeholder="Email address"
+                            placeholderTextColor={isDark ? '#888' : '#999'}
                             keyboardType="email-address"
                         />
                     ) : (
-                        <ThemedText style={styles.displayValue}>{profile.email}</ThemedText>
+                        <ThemedText style={[styles.displayValue, isDark && styles.displayValueDark]}>
+                            {profile.email}
+                        </ThemedText>
                     )}
                 </ThemedView>
+
                 <ThemedView style={styles.inputGroup}>
                     <ThemedText style={styles.label}>Phone</ThemedText>
                     {isEditing ? (
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, isDark && styles.inputDark]}
                             value={editedProfile.phone}
                             onChangeText={(value) => handleInputChange('phone', value)}
                             placeholder="Phone number"
+                            placeholderTextColor={isDark ? '#888' : '#999'}
                             keyboardType="phone-pad"
                         />
                     ) : (
-                        <ThemedText style={styles.displayValue}>{profile.phone}</ThemedText>
+                        <ThemedText style={[styles.displayValue, isDark && styles.displayValueDark]}>
+                            {profile.phone || 'Not provided'}
+                        </ThemedText>
                     )}
                 </ThemedView>
-            </ThemedView>
+            </AnimatedView>
 
-            <ThemedView style={styles.section}>
-                <ThemedText style={styles.sectionTitle}>Vehicle Information</ThemedText>
+            <AnimatedView 
+                entering={FadeInUp.delay(400)}
+                style={styles.section}
+            >
+                <ThemedText style={[styles.sectionTitle, isDark && styles.sectionTitleDark]}>
+                    Vehicle Information
+                </ThemedText>
+                
                 <ThemedView style={styles.inputGroup}>
                     <ThemedText style={styles.label}>Year</ThemedText>
                     {isEditing ? (
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, isDark && styles.inputDark]}
                             value={editedProfile.year}
-                            onChangeText={(value) => handleInputChange('year', value)}
-                            placeholder="Year"
+                            onChangeText={(value) => handleInputChange('year', value.replace(/[^0-9]/g, ''))}
+                            placeholder="e.g., 2020"
+                            placeholderTextColor={isDark ? '#888' : '#999'}
                             keyboardType="numeric"
+                            maxLength={4}
                         />
                     ) : (
-                        <ThemedText style={styles.displayValue}>{profile.year}</ThemedText>
+                        <ThemedText style={[styles.displayValue, isDark && styles.displayValueDark]}>
+                            {profile.year || 'Not provided'}
+                        </ThemedText>
                     )}
                 </ThemedView>
+
                 <ThemedView style={styles.inputGroup}>
                     <ThemedText style={styles.label}>Make</ThemedText>
                     {isEditing ? (
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, isDark && styles.inputDark]}
                             value={editedProfile.make}
                             onChangeText={(value) => handleInputChange('make', value)}
-                            placeholder="Vehicle make"
+                            placeholder="e.g., Toyota"
+                            placeholderTextColor={isDark ? '#888' : '#999'}
                         />
                     ) : (
-                        <ThemedText style={styles.displayValue}>{profile.make}</ThemedText>
+                        <ThemedText style={[styles.displayValue, isDark && styles.displayValueDark]}>
+                            {profile.make || 'Not provided'}
+                        </ThemedText>
                     )}
                 </ThemedView>
-                <ThemedView style={styles.inputGroup}>
-                    <ThemedText style={styles.label}>Chassis Number</ThemedText>
-                    {isEditing ? (
-                        <TextInput
-                            style={styles.input}
-                            value={editedProfile.chassis}
-                            onChangeText={(value) => handleInputChange('chassis', value)}
-                            placeholder="Chassis Number"
-                        />
-                    ) : (
-                        <ThemedText style={styles.displayValue}>{profile.chassis}</ThemedText>
-                    )}
-                </ThemedView>
+
                 <ThemedView style={styles.inputGroup}>
                     <ThemedText style={styles.label}>Model</ThemedText>
                     {isEditing ? (
                         <TextInput
-                            style={styles.input}
+                            style={[styles.input, isDark && styles.inputDark]}
                             value={editedProfile.model}
                             onChangeText={(value) => handleInputChange('model', value)}
-                            placeholder="Vehicle model"
+                            placeholder="e.g., Camry"
+                            placeholderTextColor={isDark ? '#888' : '#999'}
                         />
                     ) : (
-                        <ThemedText style={styles.displayValue}>{profile.model}</ThemedText>
+                        <ThemedText style={[styles.displayValue, isDark && styles.displayValueDark]}>
+                            {profile.model || 'Not provided'}
+                        </ThemedText>
                     )}
                 </ThemedView>
-            </ThemedView>
 
-            <ThemedView style={styles.buttonContainer}>
+                <ThemedView style={styles.inputGroup}>
+                    <ThemedText style={styles.label}>Chassis Number</ThemedText>
+                    {isEditing ? (
+                        <TextInput
+                            style={[styles.input, isDark && styles.inputDark]}
+                            value={editedProfile.chassis}
+                            onChangeText={(value) => handleInputChange('chassis', value)}
+                            placeholder="Vehicle chassis/VIN"
+                            placeholderTextColor={isDark ? '#888' : '#999'}
+                            autoCapitalize="characters"
+                        />
+                    ) : (
+                        <ThemedText style={[styles.displayValue, isDark && styles.displayValueDark]}>
+                            {profile.chassis || 'Not provided'}
+                        </ThemedText>
+                    )}
+                </ThemedView>
+            </AnimatedView>
+
+            <AnimatedView 
+                entering={FadeInUp.delay(500)}
+                style={styles.buttonContainer}
+            >
                 {!isEditing ? (
                     <ThemedView>
                         <TouchableOpacity
-                            style={styles.editButton}
+                            style={[styles.editButton, isDark && styles.editButtonDark]}
                             onPress={() => setIsEditing(true)}>
                             <ThemedText style={styles.buttonText}>Edit Profile</ThemedText>
                         </TouchableOpacity>
@@ -249,18 +384,32 @@ export default function ProfileScreen() {
                 ) : (
                     <ThemedView style={styles.buttonRow}>
                         <TouchableOpacity
-                            style={[styles.button, styles.saveButton]}
-                            onPress={handleSave}>
-                            <ThemedText style={styles.buttonText}>Save</ThemedText>
+                            style={[
+                                styles.button, 
+                                styles.saveButton, 
+                                isDark && styles.saveButtonDark,
+                                isSaving && styles.buttonDisabled
+                            ]}
+                            onPress={handleSave}
+                            disabled={isSaving}>
+                            {isSaving ? (
+                                <ActivityIndicator color="#fff" size="small" />
+                            ) : (
+                                <ThemedText style={styles.buttonText}>Save Changes</ThemedText>
+                            )}
                         </TouchableOpacity>
                         <TouchableOpacity
-                            style={[styles.button, styles.cancelButton]}
-                            onPress={handleCancel}>
-                            <ThemedText style={styles.cancelButtonText}>Cancel</ThemedText>
+                            style={[styles.button, styles.cancelButton, isDark && styles.cancelButtonDark]}
+                            onPress={handleCancel}
+                            disabled={isSaving}>
+                            <ThemedText style={[styles.cancelButtonText, isDark && styles.cancelButtonTextDark]}>
+                                Cancel
+                            </ThemedText>
                         </TouchableOpacity>
                     </ThemedView>
                 )}
-            </ThemedView>
+            </AnimatedView>
+            
         </ParallaxScrollView>
     );
 }
@@ -281,58 +430,90 @@ const styles = StyleSheet.create({
         position: 'absolute',
     },
     titleContainer: {
-        flexDirection: 'row',
-        gap: 8,
+        gap: 4,
         marginBottom: 24,
+    },
+    vehicleSubtitle: {
+        fontSize: 16,
+        color: '#666',
+        fontFamily: Fonts.rounded,
+        fontWeight: '600',
+    },
+    vehicleSubtitleDark: {
+        color: '#999',
     },
     imagePickerContainer: {
         marginBottom: 24,
         alignItems: 'center',
     },
     changePhotoButton: {
-        backgroundColor: '#007AFF',
-        paddingVertical: 10,
-        paddingHorizontal: 20,
-        borderRadius: 8,
+        backgroundColor: '#000',
+        paddingVertical: 12,
+        paddingHorizontal: 24,
+        borderRadius: 12,
+    },
+    changePhotoButtonDark: {
+        backgroundColor: '#fff',
     },
     changePhotoText: {
         color: '#fff',
         fontSize: 14,
-        fontWeight: '600',
+        fontWeight: '700',
+        fontFamily: Fonts.rounded,
     },
     section: {
         marginBottom: 32,
     },
     sectionTitle: {
-        fontSize: 16,
-        fontWeight: '600',
-        marginBottom: 16,
+        fontSize: 14,
+        fontWeight: '800',
+        marginBottom: 20,
         textTransform: 'uppercase',
-        opacity: 0.7,
+        color: '#666',
+        letterSpacing: 1,
+        fontFamily: Fonts.rounded,
+    },
+    sectionTitleDark: {
+        color: '#888',
     },
     inputGroup: {
-        marginBottom: 16,
+        marginBottom: 20,
     },
     label: {
         fontSize: 14,
-        fontWeight: '500',
+        fontWeight: '600',
         marginBottom: 8,
+        fontFamily: Fonts.rounded,
     },
     input: {
-        borderWidth: 1,
-        borderColor: '#ccc',
-        borderRadius: 8,
-        paddingHorizontal: 12,
-        paddingVertical: 10,
-        fontSize: 14,
-        color: '#000',
+        borderWidth: 2,
+        borderColor: '#e0e0e0',
+        borderRadius: 12,
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        fontSize: 16,
+        backgroundColor: '#f5f5f5',
+        fontFamily: Fonts.rounded,
+    },
+    inputDark: {
+        borderColor: '#333',
+        backgroundColor: '#1a1a1a',
+        color: '#fff',
     },
     displayValue: {
-        fontSize: 14,
-        paddingVertical: 10,
-        paddingHorizontal: 12,
+        fontSize: 16,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
         backgroundColor: '#f5f5f5',
-        borderRadius: 8,
+        borderRadius: 12,
+        borderWidth: 2,
+        borderColor: '#e0e0e0',
+        fontFamily: Fonts.rounded,
+    },
+    displayValueDark: {
+        backgroundColor: '#1a1a1a',
+        borderColor: '#333',
+        color: '#fff',
     },
     buttonContainer: {
         marginTop: 24,
@@ -344,36 +525,55 @@ const styles = StyleSheet.create({
     },
     button: {
         flex: 1,
-        paddingVertical: 12,
-        borderRadius: 8,
+        paddingVertical: 16,
+        borderRadius: 12,
         alignItems: 'center',
+        justifyContent: 'center',
     },
     editButton: {
         backgroundColor: '#000',
-        paddingVertical: 12,
-        borderRadius: 8,
+        paddingVertical: 16,
+        borderRadius: 12,
         alignItems: 'center',
+    },
+    editButtonDark: {
+        backgroundColor: '#fff',
     },
     saveButton: {
         backgroundColor: '#000',
     },
+    saveButtonDark: {
+        backgroundColor: '#fff',
+    },
     cancelButton: {
         backgroundColor: '#f5f5f5',
-        borderWidth: 1,
-        borderColor: '#ccc',
+        borderWidth: 2,
+        borderColor: '#e0e0e0',
+    },
+    cancelButtonDark: {
+        backgroundColor: '#262626',
+        borderColor: '#333',
     },
     buttonText: {
         color: '#fff',
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: 16,
+        fontWeight: '700',
+        fontFamily: Fonts.rounded,
     },
     cancelButtonText: {
         color: '#000',
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: 16,
+        fontWeight: '700',
+        fontFamily: Fonts.rounded,
+    },
+    cancelButtonTextDark: {
+        color: '#fff',
+    },
+    buttonDisabled: {
+        opacity: 0.6,
     },
     logoutButton: {
         marginTop: 12,
-        backgroundColor: '#FF3B30',
+        backgroundColor: '#dc3545',
     },
 });

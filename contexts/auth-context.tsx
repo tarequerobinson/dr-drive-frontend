@@ -1,8 +1,8 @@
-import { createContext, useContext, useState, useEffect } from 'react';
-import { router } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { router } from 'expo-router';
+import { createContext, useContext, useEffect, useState } from 'react';
 
-const API_URL = 'http://YOUR_SERVER_IP:6000/api'; // Replace with your server IP
+const API_URL = 'https://dr-drive-backend.onrender.com/api'; // Added /api prefix
 
 type User = {
     id: number;
@@ -13,6 +13,19 @@ type User = {
     year?: number;
     make?: string;
     model?: string;
+    created_at?: string;
+    updated_at?: string;
+};
+
+type SignUpData = {
+    username: string;
+    email: string;
+    password: string;
+    phone: string;
+    year?: string;
+    make?: string;
+    model?: string;
+    chassis?: string;
 };
 
 type AuthContextType = {
@@ -20,7 +33,7 @@ type AuthContextType = {
     user: User | null;
     token: string | null;
     signIn: (username: string, password: string) => Promise<void>;
-    signUp: (userData: any) => Promise<void>;
+    signUp: (userData: SignUpData) => Promise<void>;
     signOut: () => Promise<void>;
     loading: boolean;
 };
@@ -40,7 +53,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const loadStoredAuth = async () => {
         try {
-            const storedToken = await AsyncStorage.getItem('authToken');
+            const storedToken = await AsyncStorage.getItem('auth_token');
             const storedUser = await AsyncStorage.getItem('user');
 
             if (storedToken && storedUser) {
@@ -71,9 +84,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
                 throw new Error(data.error || 'Login failed');
             }
 
-            if (data.success) {
-                // Store token and user data
-                await AsyncStorage.setItem('authToken', data.token);
+            if (data.success && data.token && data.user) {
+                // Store token and user data with consistent key names
+                await AsyncStorage.setItem('auth_token', data.token);
                 await AsyncStorage.setItem('user', JSON.stringify(data.user));
 
                 setToken(data.token);
@@ -86,52 +99,55 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         } catch (error) {
             console.error('Sign in error:', error);
-            alert(error instanceof Error ? error.message : 'Login failed. Please try again.');
             throw error;
         }
     };
 
-    const signUp = async (userData: {
-        firstName: string;
-        lastName: string;
-        email: string;
-        password: string;
-        phone: string;
-        year: string;
-        make: string;
-        model: string;
-        chassisNumber: string;
-    }) => {
+    const signUp = async (userData: SignUpData) => {
         try {
-            // Create username from first and last name
-            const username = `${userData.firstName.toLowerCase()}${userData.lastName.toLowerCase()}`;
+            // Prepare payload matching backend expectations
+            const payload: any = {
+                username: userData.username,
+                email: userData.email,
+                password: userData.password,
+                phone: userData.phone,
+            };
+
+            // Add optional vehicle fields only if provided
+            if (userData.year) {
+                payload.year = parseInt(userData.year);
+            }
+            if (userData.make) {
+                payload.make = userData.make;
+            }
+            if (userData.model) {
+                payload.model = userData.model;
+            }
+            if (userData.chassis) {
+                payload.chassis = userData.chassis;
+            }
+
+            console.log('Sending sign up request:', payload);
 
             const response = await fetch(`${API_URL}/register`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({
-                    username,
-                    email: userData.email,
-                    password: userData.password,
-                    phone: userData.phone,
-                    year: parseInt(userData.year) || null,
-                    make: userData.make,
-                    model: userData.model,
-                    chassis: userData.chassisNumber,
-                }),
+                body: JSON.stringify(payload),
             });
 
             const data = await response.json();
+
+            console.log('Sign up response:', data);
 
             if (!response.ok) {
                 throw new Error(data.error || 'Registration failed');
             }
 
-            if (data.success) {
-                // Store token and user data
-                await AsyncStorage.setItem('authToken', data.token);
+            if (data.success && data.token && data.user) {
+                // Store token and user data with consistent key names
+                await AsyncStorage.setItem('auth_token', data.token);
                 await AsyncStorage.setItem('user', JSON.stringify(data.user));
 
                 setToken(data.token);
@@ -144,14 +160,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             }
         } catch (error) {
             console.error('Sign up error:', error);
-            alert(error instanceof Error ? error.message : 'Registration failed. Please try again.');
             throw error;
         }
     };
 
     const signOut = async () => {
         try {
-            await AsyncStorage.removeItem('authToken');
+            await AsyncStorage.removeItem('auth_token');
             await AsyncStorage.removeItem('user');
 
             setToken(null);
